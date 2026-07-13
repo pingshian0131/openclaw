@@ -1770,7 +1770,13 @@ async function dispatchReplyFromConfigInner(
     dispatchOperationSessionKey &&
     initialDispatchReplyOperation
   ) {
-    messageAuditTerminal?.note("skipped", { reason: "reply-operation-active" });
+    // Leave a terminal `message processed` diagnostic when a heartbeat dispatch
+    // yields to an already-active reply operation. Without it this return is
+    // silent, and a genuinely dropped reply looks identical to "still running"
+    // in the logs (the stuck-session symptom). recordProcessed only logs; it
+    // does not mutate session/queue state, so the active operation still owns
+    // the real terminal outcome.
+    recordProcessed("skipped", { reason: "reply-operation-active" });
     return {
       queuedFinal: false,
       counts: dispatcher.getQueuedCounts(),
