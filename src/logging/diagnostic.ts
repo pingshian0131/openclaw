@@ -376,17 +376,19 @@ function isIdleQueuedRecoverableSessionStall(params: {
     queueDepth: number;
   };
   activity: DiagnosticSessionActivitySnapshot;
+  ageMs: number;
   staleMs: number;
 }): boolean {
-  // Also detect orphaned activity (model_call or tool_call left behind
-  // without an active embedded owner) so recovery can pump the stale queue.
-  return (
-    params.state.state === "idle" &&
-    params.state.queueDepth > 0 &&
-    (params.activity.activeWorkKind !== undefined ||
-      params.activity.hasActiveEmbeddedRun === true) &&
-    (params.activity.lastProgressAgeMs ?? 0) > params.staleMs
-  );
+  if (params.state.state !== "idle" || params.state.queueDepth <= 0) {
+    return false;
+  }
+  // Staleness rides run-progress age when an activity marker (embedded_run,
+  // orphaned model_call/tool_call) survived the run. A fully-cleared run leaves
+  // an empty activity snapshot (no activeWorkKind, no lastProgressAgeMs), so
+  // fall back to the session's idle age; otherwise the queued turn wedges
+  // forever because the recovery classifier is never reached.
+  const staleAgeMs = params.activity.lastProgressAgeMs ?? params.ageMs;
+  return staleAgeMs > params.staleMs;
 }
 
 type DiagnosticLogParams<T extends DiagnosticEventPayload["type"]> = Omit<
@@ -968,6 +970,7 @@ export function startGatewayDiagnosticHeartbeat(
       const idleQueuedRecoverableStall = isIdleQueuedRecoverableSessionStall({
         state: { state: observation.expectedState, queueDepth: observation.queueDepth },
         activity,
+        ageMs,
         staleMs: stuckSessionWarnMs,
       });
       // Inbound traffic refreshes session age; owned work stalls on its progress clock.
