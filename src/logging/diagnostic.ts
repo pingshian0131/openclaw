@@ -579,21 +579,19 @@ function isIdleQueuedRecoverableSessionStall(params: {
     queueDepth: number;
   };
   activity: DiagnosticSessionActivitySnapshot;
+  ageMs: number;
   staleMs: number;
 }): boolean {
-  const hasEmbeddedOwner =
-    params.activity.activeWorkKind === "embedded_run" ||
-    params.activity.hasActiveEmbeddedRun === true;
-  // Also detect orphaned activity (model_call or tool_call left behind
-  // without an active embedded owner) so recovery can pump the stale queue.
-  const hasOrphanedActivity =
-    params.activity.activeWorkKind !== undefined && params.activity.hasActiveEmbeddedRun !== true;
-  return (
-    params.state.state === "idle" &&
-    params.state.queueDepth > 0 &&
-    (hasEmbeddedOwner || hasOrphanedActivity) &&
-    (params.activity.lastProgressAgeMs ?? 0) > params.staleMs
-  );
+  if (params.state.state !== "idle" || params.state.queueDepth <= 0) {
+    return false;
+  }
+  // Staleness rides run-progress age when an activity marker (embedded_run,
+  // orphaned model_call/tool_call) survived the run. A fully-cleared run leaves
+  // an empty activity snapshot (no activeWorkKind, no lastProgressAgeMs), so
+  // fall back to the session's idle age; otherwise the queued turn wedges
+  // forever because the recovery classifier is never reached.
+  const staleAgeMs = params.activity.lastProgressAgeMs ?? params.ageMs;
+  return staleAgeMs > params.staleMs;
 }
 
 export function logWebhookReceived(params: {
@@ -1313,6 +1311,7 @@ export function startDiagnosticHeartbeat(
       const idleQueuedRecoverableStall = isIdleQueuedRecoverableSessionStall({
         state,
         activity,
+        ageMs,
         staleMs: stuckSessionWarnMs,
       });
       if (
