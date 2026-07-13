@@ -5,7 +5,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 const {
   pushMessageMock,
   replyMessageMock,
-  showLoadingAnimationMock,
   getProfileMock,
   MessagingApiClientMock,
   requireRuntimeConfigMock,
@@ -17,13 +16,11 @@ const {
 } = vi.hoisted(() => {
   const pushMessageMockLocal = vi.fn();
   const replyMessageMockLocal = vi.fn();
-  const showLoadingAnimationMockLocal = vi.fn();
   const getProfileMockLocal = vi.fn();
   const MessagingApiClientMockLocal = vi.fn(function () {
     return {
       pushMessage: pushMessageMockLocal,
       replyMessage: replyMessageMockLocal,
-      showLoadingAnimation: showLoadingAnimationMockLocal,
       getProfile: getProfileMockLocal,
     };
   });
@@ -36,7 +33,6 @@ const {
   return {
     pushMessageMock: pushMessageMockLocal,
     replyMessageMock: replyMessageMockLocal,
-    showLoadingAnimationMock: showLoadingAnimationMockLocal,
     getProfileMock: getProfileMockLocal,
     MessagingApiClientMock: MessagingApiClientMockLocal,
     requireRuntimeConfigMock: requireRuntimeConfigMockLocal,
@@ -116,7 +112,6 @@ describe("LINE send helpers", () => {
     vi.setSystemTime(fixedSentAt);
     pushMessageMock.mockReset();
     replyMessageMock.mockReset();
-    showLoadingAnimationMock.mockReset();
     getProfileMock.mockReset();
     MessagingApiClientMock.mockReset();
     requireRuntimeConfigMock.mockClear();
@@ -130,7 +125,6 @@ describe("LINE send helpers", () => {
       return {
         pushMessage: pushMessageMock,
         replyMessage: replyMessageMock,
-        showLoadingAnimation: showLoadingAnimationMock,
         getProfile: getProfileMock,
       };
     });
@@ -143,7 +137,6 @@ describe("LINE send helpers", () => {
     });
     pushMessageMock.mockResolvedValue({});
     replyMessageMock.mockResolvedValue({});
-    showLoadingAnimationMock.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -452,18 +445,6 @@ describe("LINE send helpers", () => {
     });
     expect(second).toEqual(first);
     expect(getProfileMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("continues when loading animation is unsupported", async () => {
-    showLoadingAnimationMock.mockRejectedValueOnce(new Error("unsupported"));
-
-    await expect(
-      sendModule.showLoadingAnimation("line:room:R1", { cfg: LINE_TEST_CFG }),
-    ).resolves.toBeUndefined();
-
-    expect(logVerboseMock).toHaveBeenCalledWith(
-      "line: loading animation failed (non-fatal): Error: unsupported",
-    );
   });
 
   it("pushes quick-reply text and caps to 13 buttons", async () => {

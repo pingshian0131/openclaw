@@ -133,7 +133,6 @@ vi.mock("./send.js", () => ({
   pushMessagesLine: vi.fn(),
   pushTextMessageWithQuickReplies: vi.fn(),
   replyMessageLine: vi.fn(),
-  showLoadingAnimation: vi.fn(),
 }));
 
 vi.mock("./template-messages.js", () => ({

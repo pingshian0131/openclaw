@@ -39,7 +39,6 @@ import {
   pushMessagesLine,
   pushTextMessageWithQuickReplies,
   replyMessageLine,
-  showLoadingAnimation,
 } from "./send.js";
 import { buildTemplateMessageFromPayload } from "./template-messages.js";
 import type { LineChannelData, ResolvedLineAccount } from "./types.js";
@@ -118,40 +117,6 @@ export function clearLineRuntimeStateForTests() {
   runtimeState.clear();
 }
 
-function startLineLoadingKeepalive(params: {
-  cfg: OpenClawConfig;
-  userId: string;
-  accountId?: string;
-  intervalMs?: number;
-  loadingSeconds?: number;
-}): () => void {
-  const intervalMs = params.intervalMs ?? 18_000;
-  const loadingSeconds = params.loadingSeconds ?? 20;
-  let stopped = false;
-
-  const trigger = () => {
-    if (stopped) {
-      return;
-    }
-    void showLoadingAnimation(params.userId, {
-      cfg: params.cfg,
-      accountId: params.accountId,
-      loadingSeconds,
-    }).catch(() => {});
-  };
-
-  trigger();
-  const timer = setInterval(trigger, intervalMs);
-
-  return () => {
-    if (stopped) {
-      return;
-    }
-    stopped = true;
-    clearInterval(timer);
-  };
-}
-
 export async function monitorLineProvider(
   opts: MonitorLineProviderOptions,
 ): Promise<LineProviderMonitor> {
@@ -196,19 +161,9 @@ export async function monitorLineProvider(
         },
       });
 
-      const shouldShowLoading = Boolean(ctx.userId && !ctx.isGroup);
-
       const displayNamePromise = ctx.userId
         ? getUserDisplayName(ctx.userId, { cfg: config, accountId: ctx.accountId })
         : Promise.resolve(ctxPayload.From);
-
-      const stopLoading = shouldShowLoading
-        ? startLineLoadingKeepalive({
-            cfg: config,
-            userId: ctx.userId!,
-            accountId: ctx.accountId,
-          })
-        : null;
 
       const displayName = await displayNamePromise;
       logVerbose(`line: received message from ${displayName} (${ctxPayload.From})`);
@@ -250,13 +205,6 @@ export async function monitorLineProvider(
                   }),
                 deliver: async (payload) => {
                   const lineData = (payload.channelData?.line as LineChannelData | undefined) ?? {};
-
-                  if (ctx.userId && !ctx.isGroup) {
-                    void showLoadingAnimation(ctx.userId, {
-                      cfg: config,
-                      accountId: ctx.accountId,
-                    }).catch(() => {});
-                  }
 
                   const deliveryResult = await deliverLineAutoReply({
                     payload,
@@ -332,8 +280,6 @@ export async function monitorLineProvider(
             runtime.error?.(danger(`line: error reply failed: ${String(replyErr)}`));
           }
         }
-      } finally {
-        stopLoading?.();
       }
     },
   });

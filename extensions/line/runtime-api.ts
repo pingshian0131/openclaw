@@ -88,7 +88,6 @@ export {
   getUserProfile,
   pushImageMessage,
   replyMessageLine,
-  showLoadingAnimation,
 } from "./src/send.js";
 export { validateLineSignature } from "./src/signature.js";
 export {
