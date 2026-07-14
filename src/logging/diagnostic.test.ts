@@ -1308,6 +1308,71 @@ describe("stuck session diagnostics threshold", () => {
     );
   });
 
+  it("recovers idle queued work when the run fully cleared its activity", async () => {
+    // Regression: a completed run leaves an empty activity snapshot (no
+    // activeWorkKind, no lastProgressAgeMs). A queued follow-up must still be
+    // detected via the session's idle age, or the turn wedges forever because
+    // the recovery classifier is never reached.
+    const events: DiagnosticEventPayload[] = [];
+    const recoverStuckSession = vi.fn().mockResolvedValue({
+      status: "released",
+      action: "release_lane",
+      sessionId: "s1",
+      sessionKey: "main",
+      released: 0,
+    });
+    const unsubscribe = onDiagnosticEvent((event) => {
+      events.push(event);
+    });
+    try {
+      startDiagnosticHeartbeat(
+        {
+          diagnostics: {
+            enabled: true,
+            stuckSessionWarnMs: 30_000,
+            stuckSessionAbortMs: 60_000,
+          },
+        },
+        { recoverStuckSession },
+      );
+      logSessionStateChange({ sessionId: "s1", sessionKey: "main", state: "processing" });
+      logSessionStateChange({ sessionId: "s1", sessionKey: "main", state: "idle" });
+      // Queue first, then let the session idle-age past the warn threshold; the
+      // queued turn (not activity age) is the only staleness signal here.
+      logMessageQueued({ sessionId: "s1", sessionKey: "main", source: "test-followup" });
+      vi.advanceTimersByTime(61_000);
+      await Promise.resolve();
+    } finally {
+      unsubscribe();
+    }
+
+    expectRecordFields(
+      requireRecord(
+        events.findLast((event) => event.type === "session.stuck"),
+        "idle cleared-activity event",
+      ),
+      {
+        type: "session.stuck",
+        state: "idle",
+        classification: "stale_session_state",
+        reason: "queued_work_without_active_run",
+        queueDepth: 1,
+      },
+    );
+    expectRecoveryCall(
+      recoverStuckSession,
+      {
+        sessionId: "s1",
+        sessionKey: "main",
+        queueDepth: 1,
+        expectedState: "idle",
+      },
+      ["ageMs", "stateGeneration"],
+    );
+    const recoveryParams = requireFirstMockCallArg(recoverStuckSession, "recoverStuckSession");
+    expect(recoveryParams.allowActiveAbort).toBeUndefined();
+  });
+
   it("recovers idle queued work blocked by stale model activity without active ownership", async () => {
     const events: DiagnosticEventPayload[] = [];
     const recoverStuckSession = vi.fn().mockResolvedValue({

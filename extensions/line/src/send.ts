@@ -472,23 +472,6 @@ export function createTextMessageWithQuickReplies(
   };
 }
 
-export async function showLoadingAnimation(
-  chatId: string,
-  opts: LineClientOpts & { loadingSeconds?: number },
-): Promise<void> {
-  const { client } = createLineMessagingClient(opts);
-
-  try {
-    await client.showLoadingAnimation({
-      chatId: normalizeTarget(chatId),
-      loadingSeconds: opts.loadingSeconds ?? 20,
-    });
-    logVerbose(`line: showing loading animation to ${chatId}`);
-  } catch (err) {
-    logVerbose(`line: loading animation failed (non-fatal): ${String(err)}`);
-  }
-}
-
 export async function getUserProfile(
   userId: string,
   opts: LineClientOpts & { useCache?: boolean },

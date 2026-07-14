@@ -130,4 +130,33 @@ describe("dispatchReplyFromConfig stale visible admission recovery", () => {
     expect(replyResolver).toHaveBeenCalledTimes(1);
     expect(dispatchParams.dispatcher.sendFinalReply).toHaveBeenCalledTimes(1);
   });
+
+  it("records a terminal processed diagnostic when a heartbeat yields to an active reply operation", async () => {
+    // Regression: this heartbeat early-return used to leave only an audit note,
+    // so a dropped reply was indistinguishable from "still running" in the
+    // diagnostics (the stuck-session symptom). It must emit a terminal
+    // `message processed` log without running the resolver or owning delivery.
+    diagnosticMocks.logMessageProcessed.mockReset();
+    const activeOperation = createReplyOperation({
+      sessionKey,
+      sessionId: "active-session",
+      resetTriggered: false,
+    });
+    activeOperation.setPhase("running");
+    const replyResolver = vi.fn(async () => ({ text: "telegram reply" }) satisfies ReplyPayload);
+    const dispatchParams = {
+      ...createVisibleDispatchParams(replyResolver),
+      replyOptions: { isHeartbeat: true },
+    };
+
+    const result = await dispatchReplyFromConfig(dispatchParams);
+
+    expect(result).toMatchObject({ queuedFinal: false });
+    expect(replyResolver).not.toHaveBeenCalled();
+    expect(dispatchParams.dispatcher.sendFinalReply).not.toHaveBeenCalled();
+    expect(diagnosticMocks.logMessageProcessed).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "skipped", reason: "reply-operation-active" }),
+    );
+    activeOperation.complete();
+  });
 });

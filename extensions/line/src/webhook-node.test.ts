@@ -448,14 +448,23 @@ describe("createLineNodeWebhookHandler", () => {
     expect(payload.events).toEqual([{ type: "message" }]);
   });
 
-  it("acknowledges signed event requests before event processing completes", async () => {
+  it("keeps the handler pending until event processing completes, even though the HTTP ack lands earlier", async () => {
+    // Regression: the handler used to detach event processing from its own
+    // returned promise (`void promise.then(...)`), so the promise the
+    // gateway awaits before releasing its root work-admission lease
+    // resolved immediately, while processing kept running in the
+    // background. Every subsequent inbound message then raced an
+    // already-released lease and failed with GatewayDrainingError. The
+    // handler must now await processing before its own promise settles.
+    // The HTTP ack itself is sent earlier (via the receive-context ack
+    // callback, independent of event processing) and is unaffected.
     const rawBody = JSON.stringify({ events: [{ type: "message" }] });
-    let releaseAuthenticated: (() => void) | undefined;
+    let releaseProcessing: (() => void) | undefined;
     const bot = {
       handleWebhook: vi.fn(
         async () =>
           await new Promise<void>((resolve) => {
-            releaseAuthenticated = resolve;
+            releaseProcessing = resolve;
           }),
       ),
     };
@@ -470,21 +479,33 @@ describe("createLineNodeWebhookHandler", () => {
     });
 
     const { res } = createRes();
-    const request = runSignedPost({ handler, rawBody, secret: SECRET, res });
+    let requestSettled = false;
+    const request = runSignedPost({ handler, rawBody, secret: SECRET, res }).then(() => {
+      requestSettled = true;
+    });
 
     await vi.waitFor(() => {
       expect(onRequestAuthenticated).toHaveBeenCalledTimes(1);
       expect(bot.handleWebhook).toHaveBeenCalledTimes(1);
     });
 
-    await request;
-
+    // The HTTP ack is sent as soon as the body is received/validated,
+    // independent of event processing.
     expect(res.statusCode).toBe(200);
     expect(res.headersSent).toBe(true);
-    if (!releaseAuthenticated) {
-      throw new Error("Expected LINE authenticated request release callback to be initialized");
+
+    // But the handler's own promise -- what the gateway's work-admission
+    // lease awaits before releasing -- must stay pending until event
+    // processing completes.
+    expect(requestSettled).toBe(false);
+
+    if (!releaseProcessing) {
+      throw new Error("Expected LINE webhook processing release callback to be initialized");
     }
-    releaseAuthenticated();
+    releaseProcessing();
+
+    await request;
+    expect(requestSettled).toBe(true);
   });
 
   it("returns 400 for invalid JSON payload even when signature is valid", async () => {
