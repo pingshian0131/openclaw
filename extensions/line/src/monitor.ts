@@ -382,13 +382,11 @@ export async function monitorLineProvider(
 
           if (body.events && body.events.length > 0) {
             logVerbose(`line: received ${body.events.length} webhook events`);
-            void Promise.resolve()
-              .then(() => match.target.bot.handleWebhook(body))
-              .catch((err: unknown) => {
-                match.target.runtime.error?.(
-                  danger(`line webhook dispatch failed: ${String(err)}`),
-                );
-              });
+            try {
+              await match.target.bot.handleWebhook(body);
+            } catch (err) {
+              match.target.runtime.error?.(danger(`line webhook dispatch failed: ${String(err)}`));
+            }
           }
         } catch (err) {
           if (isRequestBodyLimitError(err, "PAYLOAD_TOO_LARGE")) {

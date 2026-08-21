@@ -400,7 +400,15 @@ describe("monitorLineProvider lifecycle", () => {
     monitor.stop();
   });
 
-  it("acknowledges shared-path POST requests before matched event processing completes", async () => {
+  it("acknowledges shared-path POST requests before matched event processing completes, but keeps the handler pending until it does", async () => {
+    // Regression: the shared-path handler used to detach event processing
+    // from its own returned promise (`void promise.then(...)`), so the
+    // promise the gateway awaits before releasing its root work-admission
+    // lease resolved immediately, while processing kept running in the
+    // background. Every subsequent inbound message then raced an
+    // already-released lease and failed with GatewayDrainingError. The
+    // HTTP ack (res.end) is still sent immediately -- unaffected -- but the
+    // handler's own promise must now stay pending until processing completes.
     const monitor = await monitorLineProvider({
       channelAccessToken: "token",
       channelSecret: "secret", // pragma: allowlist secret
@@ -429,15 +437,33 @@ describe("monitorLineProvider lifecycle", () => {
     }) as unknown as IncomingMessage;
     const res = createRouteResponse();
 
-    await route.handler(req, res);
+    let handlerSettled = false;
+    const handlerPromise = Promise.resolve(route.handler(req, res)).then(() => {
+      handlerSettled = true;
+    });
 
+    await vi.waitFor(() => {
+      expect(bot.handleWebhook).toHaveBeenCalledTimes(1);
+    });
+
+    // The HTTP ack is sent as soon as the body is received/validated,
+    // independent of event processing.
     expect(res.statusCode).toBe(200);
     expect(res.headersSent).toBe(true);
-    expect(bot.handleWebhook).toHaveBeenCalledTimes(1);
+
+    // But the handler's own promise -- what the gateway's work-admission
+    // lease awaits before releasing -- must stay pending until event
+    // processing completes.
+    expect(handlerSettled).toBe(false);
+
     if (!releaseWebhook) {
       throw new Error("expected pending LINE webhook handler");
     }
     releaseWebhook();
+
+    await handlerPromise;
+    expect(handlerSettled).toBe(true);
+
     monitor.stop();
   });
 
