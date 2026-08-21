@@ -228,6 +228,19 @@ export function tryBeginGatewayIndependentRootWorkAdmission(): GatewayRootWorkAd
   return createGatewayRootWorkAdmission();
 }
 
+/** Runs a request boundary under root admission, replacing any released inherited context. */
+export async function runWithGatewayRootWorkAdmission<T>(run: () => Promise<T>): Promise<T> {
+  const admission = tryBeginGatewayRootWorkAdmission();
+  if (!admission) {
+    throw new GatewayDrainingError();
+  }
+  try {
+    return await admission.run(run);
+  } finally {
+    admission.release();
+  }
+}
+
 /** Waits through a prepared lease, then joins the root-work set atomically. */
 export async function beginGatewayRootWorkAdmissionWhenOpen(): Promise<GatewayRootWorkAdmissionLease> {
   while (true) {

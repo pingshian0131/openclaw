@@ -10,6 +10,7 @@ import {
   runWithDiagnosticTraceContext,
 } from "../../infra/diagnostic-trace-context.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
+import { runWithGatewayRootWorkAdmission } from "../../process/gateway-work-admission.js";
 import { toHistoryMediaEntries } from "../inbound-event/media.js";
 import { createChannelReplyPipeline } from "../message/reply-pipeline.js";
 import { recordChannelBotPairLoopAndCheckSuppression } from "./bot-loop-protection.js";
@@ -621,7 +622,7 @@ async function runPreparedChannelTurn<
 
 export const runPreparedInboundReply = runPreparedChannelTurn;
 
-async function runChannelTurn<
+async function runChannelTurnWithinAdmission<
   TRaw,
   TDispatchResult = DispatchedChannelTurnResult["dispatchResult"],
 >(
@@ -790,6 +791,19 @@ async function runChannelTurn<
   }
 
   return result;
+}
+
+async function runChannelTurn<
+  TRaw,
+  TDispatchResult = DispatchedChannelTurnResult["dispatchResult"],
+>(
+  params: RunChannelTurnParams<TRaw, TDispatchResult>,
+): Promise<ChannelTurnResult<TDispatchResult>> {
+  // Channel callbacks can be invoked by long-lived async resources created during startup.
+  // Replace a released inherited root before the turn queues agent/session work.
+  return await runWithGatewayRootWorkAdmission(
+    async () => await runChannelTurnWithinAdmission(params),
+  );
 }
 
 export const runChannelInboundEvent = runChannelTurn;
