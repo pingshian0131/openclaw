@@ -27,7 +27,6 @@ import { createLineBot } from "./bot.js";
 import { processLineMessage } from "./markdown-to-line.js";
 import { resolveLineDurableReplyOptions } from "./monitor-durable.js";
 import { sendLineReplyChunks } from "./reply-chunks.js";
-import { createLineReplyTypingFeedback } from "./reply-typing-feedback.js";
 import { getLineRuntime } from "./runtime.js";
 import {
   createFlexMessage,
@@ -40,6 +39,7 @@ import {
   pushMessagesLine,
   pushTextMessageWithQuickReplies,
   replyMessageLine,
+  showLoadingAnimation,
 } from "./send.js";
 import { buildTemplateMessageFromPayload } from "./template-messages.js";
 import type { LineChannelData, ResolvedLineAccount } from "./types.js";
@@ -76,6 +76,40 @@ type LineWebhookTarget = {
 };
 
 const lineWebhookTargets = new Map<string, LineWebhookTarget[]>();
+
+function startLineLoadingKeepalive(params: {
+  cfg: OpenClawConfig;
+  userId: string;
+  accountId?: string;
+  intervalMs?: number;
+  loadingSeconds?: number;
+}): () => void {
+  const intervalMs = params.intervalMs ?? 18_000;
+  const loadingSeconds = params.loadingSeconds ?? 20;
+  let stopped = false;
+
+  const trigger = () => {
+    if (stopped) {
+      return;
+    }
+    void showLoadingAnimation(params.userId, {
+      cfg: params.cfg,
+      accountId: params.accountId,
+      loadingSeconds,
+    }).catch(() => {});
+  };
+
+  trigger();
+  const timer = setInterval(trigger, intervalMs);
+
+  return () => {
+    if (stopped) {
+      return;
+    }
+    stopped = true;
+    clearInterval(timer);
+  };
+}
 
 export async function monitorLineProvider(
   opts: MonitorLineProviderOptions,
@@ -119,26 +153,18 @@ export async function monitorLineProvider(
         ? getUserDisplayName(ctx.userId, { cfg: config, accountId: ctx.accountId })
         : Promise.resolve(ctxPayload.From);
 
-      // LINE's loading animation doubles as the read receipt: `chat/loading/start`
-      // is the only endpoint a non-partner OA has for either, so start it up front
-      // to keep the receipt prompt. Ownership then passes to the core typing
-      // lifecycle via replyPipeline, which seals these callbacks once the run
-      // completes and the dispatcher drains.
-      const typingCallbacks = shouldShowLoading
-        ? createLineReplyTypingFeedback({
+      const stopLoading = shouldShowLoading
+        ? startLineLoadingKeepalive({
             cfg: config,
             userId: ctx.userId!,
             accountId: ctx.accountId,
-            log: (message) => logVerbose(message),
           })
-        : undefined;
-      void typingCallbacks?.onReplyStart().catch((err: unknown) => {
-        logVerbose(`line: loading animation failed (non-fatal): ${String(err)}`);
-      });
+        : null;
+
+      const displayName = await displayNamePromise;
+      logVerbose(`line: received message from ${displayName} (${ctxPayload.From})`);
 
       try {
-        const displayName = await displayNamePromise;
-        logVerbose(`line: received message from ${displayName} (${ctxPayload.From})`);
         const textLimit = 5000;
         let replyTokenUsed = false;
         const core = getLineRuntime();
@@ -163,7 +189,7 @@ export async function monitorLineProvider(
               dispatchReplyWithBufferedBlockDispatcher:
                 core.channel.reply.dispatchReplyWithBufferedBlockDispatcher,
               record: ctx.turn.record,
-              replyPipeline: typingCallbacks ? { typingCallbacks } : {},
+              replyPipeline: {},
               delivery: {
                 durable: (payload, info) =>
                   resolveLineDurableReplyOptions({
@@ -175,6 +201,13 @@ export async function monitorLineProvider(
                   }),
                 deliver: async (payload) => {
                   const lineData = (payload.channelData?.line as LineChannelData | undefined) ?? {};
+
+                  if (ctx.userId && !ctx.isGroup) {
+                    void showLoadingAnimation(ctx.userId, {
+                      cfg: config,
+                      accountId: ctx.accountId,
+                    }).catch(() => {});
+                  }
 
                   const deliveryResult = await deliverLineAutoReply({
                     payload,
@@ -243,9 +276,7 @@ export async function monitorLineProvider(
           }
         }
       } finally {
-        // The core typing controller normally seals these itself; sealing again is
-        // idempotent and covers turns that throw before dispatch ever adopts them.
-        typingCallbacks?.onCleanup?.();
+        stopLoading?.();
       }
     },
   });
