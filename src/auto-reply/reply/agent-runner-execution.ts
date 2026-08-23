@@ -2601,6 +2601,10 @@ async function runAgentTurnWithFallbackInternal(
                         if (completedMessageToolDelivery) {
                           messageToolOnlyDeliveryToolCallIds.delete(itemToolCallId);
                           messageToolOnlyDeliveryCompleted = true;
+                          // The user has the reply; nothing after this point is
+                          // visible to them, so stop the indicator here instead
+                          // of at run completion.
+                          params.typingSignals.signalVisibleDelivery();
                         }
                         if (
                           evt.stream === "assistant" &&

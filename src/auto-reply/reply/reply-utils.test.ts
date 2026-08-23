@@ -893,6 +893,20 @@ describe("createTypingSignaler", () => {
     }
   });
 
+  it("stops typing once a message tool delivers a visible reply", async () => {
+    for (const mode of ["instant", "message", "thinking"] as const) {
+      const typing = createMockTypingController();
+      const signaler = createTypingSignaler({ typing, mode, isHeartbeat: false });
+
+      await signaler.signalToolStart();
+      signaler.signalVisibleDelivery();
+
+      // Renewing past the visible reply strands indicators that cannot be
+      // cancelled, so the controller has to be sealed here, not at run end.
+      expect(typing.cleanup, `mode=${mode}`).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it("suppresses typing when disabled", async () => {
     const disabledCases = [
       { mode: "instant" as const, isHeartbeat: true },
@@ -906,9 +920,11 @@ describe("createTypingSignaler", () => {
       await signaler.signalTextDelta("hi");
       await signaler.signalReasoningDelta();
       await signaler.signalExecutionActivity?.();
+      signaler.signalVisibleDelivery();
 
       expect(typing.startTypingLoop, `mode=${params.mode}`).not.toHaveBeenCalled();
       expect(typing.startTypingOnText, `mode=${params.mode}`).not.toHaveBeenCalled();
+      expect(typing.cleanup, `mode=${params.mode}`).not.toHaveBeenCalled();
     }
   });
 });

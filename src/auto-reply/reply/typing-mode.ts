@@ -64,6 +64,8 @@ export type TypingSignaler = {
   signalReasoningDelta: () => Promise<void>;
   signalToolStart: () => Promise<void>;
   signalExecutionActivity?: () => Promise<void>;
+  /** Stops the indicator once a message tool has delivered a visible reply. */
+  signalVisibleDelivery: () => void;
 };
 
 /** Creates a typing signaler that starts or refreshes typing from stream events. */
@@ -167,6 +169,17 @@ export function createTypingSignaler(params: {
     typing.refreshTypingTtl();
   };
 
+  // Once a message tool delivers, the rest of the run is invisible to the user,
+  // so an indicator renewed past this point has no message left to retire it.
+  // Channels whose indicator cannot be cancelled (LINE's loading animation has
+  // no stop endpoint) would otherwise leave it running for its whole window.
+  const signalVisibleDelivery = () => {
+    if (disabled) {
+      return;
+    }
+    typing.cleanup();
+  };
+
   return {
     mode,
     shouldStartImmediately,
@@ -179,5 +192,6 @@ export function createTypingSignaler(params: {
     signalReasoningDelta,
     signalToolStart,
     signalExecutionActivity,
+    signalVisibleDelivery,
   };
 }

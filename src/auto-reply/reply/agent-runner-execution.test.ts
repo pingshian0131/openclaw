@@ -450,6 +450,7 @@ function createMockTypingSignaler(): TypingSignaler {
     signalReasoningDelta: vi.fn(async () => {}),
     signalToolStart: vi.fn(async () => {}),
     signalExecutionActivity: vi.fn(async () => {}),
+    signalVisibleDelivery: vi.fn(() => {}),
   };
 }
 
