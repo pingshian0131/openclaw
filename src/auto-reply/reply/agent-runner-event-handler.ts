@@ -149,6 +149,9 @@ export function createAgentRunEventHandler(params: {
     if (completedMessageToolDelivery) {
       params.messageToolDeliveryState.toolCallIds.delete(itemToolCallId);
       params.messageToolDeliveryState.completed = true;
+      // The user has the reply; nothing after this point is visible to them,
+      // so stop the indicator here instead of at run completion.
+      params.turn.typingSignals.signalVisibleDelivery?.();
     }
 
     if (
