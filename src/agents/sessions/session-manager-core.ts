@@ -40,6 +40,26 @@ import type {
   SessionManagerBoundedContext,
 } from "./session-manager-view-types.js";
 
+/**
+ * True for a headerless transcript that only a current-version runtime could have written: it
+ * opens with a reset/compaction boundary and every row is an indexed (id/parentId) entry.
+ * Legacy v1 rows carry no ids and v2+ transcripts always start with their header, so this shape
+ * cannot be mistaken for history that still needs doctor/import migration.
+ */
+function isHeaderlessCurrentBoundaryTranscript(
+  partitioned: ReturnType<typeof partitionSessionFileEntries>,
+): boolean {
+  const first = partitioned.fileEntries[0];
+  return (
+    first !== undefined &&
+    partitioned.opaqueEntries.length === 0 &&
+    (first.type === "reset" || first.type === "compaction") &&
+    partitioned.fileEntries.every(
+      (entry) => entry.type !== "session" && isIndexedSessionEntry(entry),
+    )
+  );
+}
+
 export class SessionManagerCore extends SessionEntryNavigation<SessionEntry> {
   migrated = false;
   protected sessionId = "";
@@ -208,7 +228,15 @@ export class SessionManagerCore extends SessionEntryNavigation<SessionEntry> {
       this.persistenceHeaderPending = target !== undefined;
       return;
     }
-    const header = partitioned.fileEntries.find((entry) => entry.type === "session");
+    let header = partitioned.fileEntries.find((entry) => entry.type === "session");
+    if (target && !header && isHeaderlessCurrentBoundaryTranscript(partitioned)) {
+      // Upstream now writes the header before a first-append reset boundary, but transcripts
+      // wedged by older runtimes (boundary persisted as the first row) still exist. Those rows
+      // are current-format by construction; adopt them under a fresh in-memory header instead
+      // of wedging the session.
+      header = this.createSessionHeader(target.sessionId);
+      partitioned.fileEntries.unshift(header);
+    }
     if (target) {
       assertCurrentSessionTranscriptHeader(header);
     }
@@ -409,17 +437,21 @@ export class SessionManagerCore extends SessionEntryNavigation<SessionEntry> {
     return this.initializeSession(options);
   }
 
+  private createSessionHeader(id: string, parentSession?: string): SessionHeader {
+    return {
+      type: "session",
+      version: CURRENT_SESSION_VERSION,
+      id,
+      timestamp: new Date().toISOString(),
+      cwd: this.cwd,
+      parentSession,
+    };
+  }
+
   private initializeSession(options?: NewSessionOptions): string | undefined {
     this.sessionId = options?.id ?? this.persistenceTarget?.sessionId ?? createManagedSessionId();
     this.migrated = false;
-    const header: SessionHeader = {
-      type: "session",
-      version: CURRENT_SESSION_VERSION,
-      id: this.sessionId,
-      timestamp: new Date().toISOString(),
-      cwd: this.cwd,
-      parentSession: options?.parentSession,
-    };
+    const header = this.createSessionHeader(this.sessionId, options?.parentSession);
     this.fileEntries = [header];
     this.opaqueFileEntries = [];
     this.clearNavigation();
