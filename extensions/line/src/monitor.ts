@@ -22,9 +22,9 @@ import { resolveDefaultLineAccountId, resolveLineAccount } from "./accounts.js";
 import { deliverLineAutoReply } from "./auto-reply-delivery.js";
 import { createLineBot } from "./bot.js";
 import { resolveLineDurableReplyOptions } from "./monitor-durable.js";
+import { createLineReplyTypingFeedback } from "./reply-typing-feedback.js";
 import { prepareLineReplyPayload } from "./rich-messages.js";
 import { getLineRuntime } from "./runtime.js";
-import { showLoadingAnimation } from "./send.js";
 import type { LineChannelData, ResolvedLineAccount } from "./types.js";
 import { createLineNodeWebhookHandler } from "./webhook-node.js";
 import { LineWebhookTerminalDeliveryError } from "./webhook-spool.js";
@@ -73,40 +73,6 @@ async function registerLineWebhookTarget(
 
 const lineWebhookTargets = new Map<string, LineWebhookTarget[]>();
 
-function startLineLoadingKeepalive(params: {
-  cfg: OpenClawConfig;
-  userId: string;
-  accountId?: string;
-  intervalMs?: number;
-  loadingSeconds?: number;
-}): () => void {
-  const intervalMs = params.intervalMs ?? 18_000;
-  const loadingSeconds = params.loadingSeconds ?? 20;
-  let stopped = false;
-
-  const trigger = () => {
-    if (stopped) {
-      return;
-    }
-    void showLoadingAnimation(params.userId, {
-      cfg: params.cfg,
-      accountId: params.accountId,
-      loadingSeconds,
-    }).catch(() => {});
-  };
-
-  trigger();
-  const timer = setInterval(trigger, intervalMs);
-
-  return () => {
-    if (stopped) {
-      return;
-    }
-    stopped = true;
-    clearInterval(timer);
-  };
-}
-
 export async function monitorLineProvider(
   opts: MonitorLineProviderOptions,
 ): Promise<LineProviderMonitor> {
@@ -151,13 +117,22 @@ export async function monitorLineProvider(
 
       const shouldShowLoading = Boolean(ctx.userId && !ctx.isGroup);
 
-      const stopLoading = shouldShowLoading
-        ? startLineLoadingKeepalive({
+      // LINE's loading animation doubles as the read receipt: `chat/loading/start`
+      // is the only endpoint a non-partner OA has for either, so start it up front
+      // to keep the receipt prompt. Ownership then passes to the core typing
+      // lifecycle via replyPipeline, which seals these callbacks once a message
+      // tool delivers or the run completes and the dispatcher drains.
+      const typingCallbacks = shouldShowLoading
+        ? createLineReplyTypingFeedback({
             cfg: turnConfig,
             userId: ctx.userId!,
             accountId: ctx.accountId,
+            log: (message) => logVerbose(message),
           })
-        : null;
+        : undefined;
+      void typingCallbacks?.onReplyStart().catch((err: unknown) => {
+        logVerbose(`line: loading animation failed (non-fatal): ${String(err)}`);
+      });
 
       // The inbound context already resolved the sender's name for the agent;
       // reading it back costs nothing instead of asking LINE a second time.
@@ -221,7 +196,7 @@ export async function monitorLineProvider(
               route: { agentId: route.agentId, sessionKey: route.sessionKey },
               ctxPayload,
               record: ctx.turn.record,
-              replyPipeline: {},
+              replyPipeline: typingCallbacks ? { typingCallbacks } : {},
               // Block replies are paced by the agent's own humanDelay; nothing else
               // reads it, so a turn that never forwards it silently paces at zero.
               dispatcherOptions: {
@@ -242,13 +217,6 @@ export async function monitorLineProvider(
                   }),
                 deliver: async (payload) => {
                   const lineData = (payload.channelData?.line as LineChannelData | undefined) ?? {};
-
-                  if (ctx.userId && !ctx.isGroup) {
-                    void showLoadingAnimation(ctx.userId, {
-                      cfg: turnConfig,
-                      accountId: ctx.accountId,
-                    }).catch(() => {});
-                  }
 
                   const deliveryResult = await deliverLineAutoReply({
                     payload,
@@ -298,7 +266,9 @@ export async function monitorLineProvider(
         }
         throw err;
       } finally {
-        stopLoading?.();
+        // The core typing controller normally seals these itself; sealing again is
+        // idempotent and covers turns that throw before dispatch ever adopts them.
+        typingCallbacks?.onCleanup?.();
       }
     },
   });
