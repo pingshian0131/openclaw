@@ -25,6 +25,7 @@ import {
   reportLineQuoteCarrierMissing,
   resolveLineQuoteToken,
 } from "./quote-tokens.js";
+import { processLineReplyText } from "./reply-split.js";
 import {
   createLineQuickReply,
   LINE_PRESENTATION_CAPABILITIES,
@@ -163,8 +164,9 @@ export const lineOutboundAdapter: NonNullable<ChannelPlugin<ResolvedLineAccount>
       );
     };
 
+    // Mirror the reply-token path: honor `<!--line-split-->` lines before Markdown processing.
     const processed = payload.text
-      ? outboundRuntime.processLineMessage(payload.text)
+      ? processLineReplyText(payload.text, outboundRuntime.processLineMessage)
       : { text: "", flexMessages: [] };
 
     const chunkLimit =

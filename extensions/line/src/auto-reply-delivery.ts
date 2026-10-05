@@ -21,6 +21,7 @@ import {
   reportLineQuoteCarrierMissing,
   resolveLineQuoteToken,
 } from "./quote-tokens.js";
+import { processLineReplyText } from "./reply-split.js";
 import { createLineQuickReply } from "./rich-messages.js";
 import {
   explainLineRefusal,
@@ -235,7 +236,12 @@ export async function deliverLineAutoReply(params: {
   // Inbound auto-replies bypass the channel outbound adapter, so enforce the
   // same assistant-visible boundary here before Markdown can create LINE UI.
   const visibleText = payload.text ? sanitizeAssistantVisibleText(payload.text) : "";
-  const processed = visibleText ? processLineMessage(visibleText) : { text: "", flexMessages: [] };
+  // Split markers come after sanitizing (they survive it) and before Markdown
+  // processing, so each part converts tables/code to Flex on its own and then
+  // lands as its own message in source order.
+  const processed = visibleText
+    ? processLineReplyText(visibleText, processLineMessage)
+    : { text: "", flexMessages: [] };
 
   if (!processed.segments) {
     for (const flexMsg of processed.flexMessages) {
