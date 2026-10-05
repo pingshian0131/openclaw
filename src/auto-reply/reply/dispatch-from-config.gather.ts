@@ -308,8 +308,14 @@ export async function gatherDispatchRequest(
     dispatchOperationSessionKey &&
     initialDispatchReplyOperation
   ) {
-    noteDispatchProcessedOutcome({ outcome: "skipped", reason: "reply-operation-active" });
-    messageAuditTerminal?.note("skipped", { reason: "reply-operation-active" });
+    // Leave a terminal `message processed` diagnostic when a heartbeat dispatch
+    // yields to an already-active reply operation. Without it this return is
+    // silent, and a genuinely dropped reply looks identical to "still running"
+    // in the logs (the stuck-session symptom). recordProcessed also notes the
+    // dispatch outcome and the audit terminal (what upstream did inline here);
+    // it only logs and does not mutate session/queue state, so the active
+    // operation still owns the real terminal outcome.
+    recordProcessed("skipped", { reason: "reply-operation-active" });
     return {
       status: "complete" as const,
       result: {
