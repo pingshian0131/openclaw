@@ -436,6 +436,23 @@ describe("line outbound sendPayload", () => {
     });
   });
 
+  it("splits push text at <!--line-split--> lines like the reply-token path", async () => {
+    const { runtime, mocks } = createRuntime();
+    setLineRuntime(runtime);
+    const cfg = { channels: { line: {} } } as OpenClawConfig;
+    const text = "<!--line-split-->\nfirst\n<!--line-split-->\n\n<!--line-split-->\nsecond";
+    const payload = { text, channelData: { line: { quickReplies: ["OK"] } } };
+    await lineOutboundAdapter.sendPayload!({ to: "u1", text, payload, accountId: "default", cfg });
+    const opts = { verbose: false, accountId: "default", cfg };
+    expect(mocks.pushMessageLine).toHaveBeenCalledExactlyOnceWith("u1", "first", opts);
+    expect(mocks.pushTextMessageWithQuickReplies).toHaveBeenCalledExactlyOnceWith(
+      "u1",
+      "second",
+      ["OK"],
+      opts,
+    );
+  });
+
   it("reports each platform result for text and media payloads", async () => {
     const { runtime } = createRuntime();
     setLineRuntime(runtime);

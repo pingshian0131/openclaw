@@ -16,6 +16,7 @@ import type { FlexContainer } from "./flex-templates.js";
 import type { ProcessedLineMessage } from "./markdown-to-line.js";
 import { hasLineSpecificMediaOptions } from "./outbound-media.js";
 import { buildLineQuickReplyFallbackText } from "./quick-reply-fallback.js";
+import { processLineReplyText } from "./reply-split.js";
 import type { LineChannelData, LineTemplateMessagePayload } from "./types.js";
 
 type LineAutoReplyDeps = {
@@ -247,8 +248,11 @@ export async function deliverLineAutoReply(params: {
   // Inbound auto-replies bypass the channel outbound adapter, so enforce the
   // same assistant-visible boundary here before Markdown can create LINE UI.
   const visibleText = payload.text ? sanitizeAssistantVisibleText(payload.text) : "";
+  // Split markers come after sanitizing (they survive it) and before Markdown
+  // processing, so each part converts tables/code to Flex on its own and then
+  // lands as its own message in source order.
   const processed = visibleText
-    ? deps.processLineMessage(visibleText)
+    ? processLineReplyText(visibleText, deps.processLineMessage)
     : { text: "", flexMessages: [] };
 
   if (!processed.segments) {
