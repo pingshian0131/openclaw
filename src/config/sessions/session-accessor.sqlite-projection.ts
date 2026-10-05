@@ -76,7 +76,7 @@ import {
   runExclusiveSqliteSessionWrite,
   toDatabaseOptions,
 } from "./session-accessor.sqlite-scope.js";
-import { appendTranscriptEventsInTransaction } from "./session-accessor.sqlite-transcript-store.js";
+import { appendSessionResetBoundaryInTransaction } from "./session-accessor.sqlite-transcript-store.js";
 import { resolveMaintenanceConfig } from "./store-maintenance-runtime.js";
 import type { ResolvedSessionMaintenanceConfig } from "./store-maintenance.js";
 import type { SessionEntry } from "./types.js";
@@ -364,15 +364,12 @@ export async function applySessionEntryLifecycleMutation(params: {
           throw new Error(`SQLite session entry has stale lifecycle state for ${sessionKey}`);
         }
         if (resetBoundaryPlan && expectedEntry?.sessionId) {
-          const events = [...resetBoundaryPlan.seedEvents, resetBoundaryPlan.event];
-          const appended = appendTranscriptEventsInTransaction(
+          appendSessionResetBoundaryInTransaction(
             transactionDb,
             { ...resolved, sessionId: expectedEntry.sessionId, sessionKey },
-            events,
+            resetBoundaryPlan,
+            { label: sessionKey, cwd: expectedEntry.spawnedCwd },
           );
-          if (appended !== events.length) {
-            throw new Error(`Failed to append reset boundary for ${sessionKey}`);
-          }
         }
         writeSessionEntry(transactionDb, sessionKey, entry, {
           allowStoredAliases: params.allowCanonicalRepair === true,

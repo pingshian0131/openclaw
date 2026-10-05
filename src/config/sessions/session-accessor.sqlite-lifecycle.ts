@@ -62,7 +62,7 @@ import {
   runExclusiveSqliteSessionWrite,
   toDatabaseOptions,
 } from "./session-accessor.sqlite-scope.js";
-import { appendTranscriptEventsInTransaction } from "./session-accessor.sqlite-transcript-store.js";
+import { appendSessionResetBoundaryInTransaction } from "./session-accessor.sqlite-transcript-store.js";
 import {
   collectAdmissionProtectedSessionIds,
   kickSessionHistoryDiskBudgetMaintenance,
@@ -206,19 +206,16 @@ export async function resetSessionEntryLifecycle(
       runOpenClawAgentWriteTransaction((transactionDb) => {
         assertLifecycleTargetUnchanged(transactionDb, params.target, current?.entry, "reset");
         if (resetBoundaryPlan && current?.entry.sessionId) {
-          const events = [...resetBoundaryPlan.seedEvents, resetBoundaryPlan.event];
-          const appended = appendTranscriptEventsInTransaction(
+          appendSessionResetBoundaryInTransaction(
             transactionDb,
             {
               ...resolved,
               sessionId: current.entry.sessionId,
               sessionKey: current.key,
             },
-            events,
+            resetBoundaryPlan,
+            { label: current.key, cwd: current.entry.spawnedCwd },
           );
-          if (appended !== events.length) {
-            throw new Error(`Failed to append reset boundary for ${current.key}`);
-          }
         }
         writeSessionEntry(transactionDb, params.target.canonicalKey, nextEntry, {
           previousEntry: current?.entry ?? null,

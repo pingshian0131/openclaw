@@ -24,6 +24,26 @@ import type {
 
 export type SessionManagerPersistenceTarget = SessionTranscriptRuntimeTarget;
 
+/**
+ * True for a headerless transcript that only a current-version runtime could have written: it
+ * opens with a reset/compaction boundary and every row is an indexed (id/parentId) entry.
+ * Legacy v1 rows carry no ids and v2+ transcripts always start with their header, so this shape
+ * cannot be mistaken for history that still needs doctor/import migration.
+ */
+function isHeaderlessCurrentBoundaryTranscript(
+  partitioned: ReturnType<typeof partitionSessionFileEntries>,
+): boolean {
+  const first = partitioned.fileEntries[0];
+  return (
+    first !== undefined &&
+    partitioned.opaqueEntries.length === 0 &&
+    (first.type === "reset" || first.type === "compaction") &&
+    partitioned.fileEntries.every(
+      (entry) => entry.type !== "session" && isIndexedSessionEntry(entry),
+    )
+  );
+}
+
 export class SessionManagerCore {
   migrated = false;
   protected sessionId = "";
@@ -81,7 +101,14 @@ export class SessionManagerCore {
       this.persistenceHeaderPending = target !== undefined;
       return;
     }
-    const header = partitioned.fileEntries.find((entry) => entry.type === "session");
+    let header = partitioned.fileEntries.find((entry) => entry.type === "session");
+    if (target && !header && isHeaderlessCurrentBoundaryTranscript(partitioned)) {
+      // A reset/compaction boundary written into an empty transcript used to become the first
+      // persisted row, so the next append skipped the header. Those rows are current-format by
+      // construction; adopt them under a fresh in-memory header instead of wedging the session.
+      header = this.createSessionHeader(target.sessionId);
+      partitioned.fileEntries.unshift(header);
+    }
     if (target && (header?.version ?? 1) < CURRENT_SESSION_VERSION) {
       throw new Error(
         "Persisted legacy session transcripts require doctor/import migration before runtime use",
@@ -114,18 +141,21 @@ export class SessionManagerCore {
     return this.initializeSession(options);
   }
 
+  private createSessionHeader(id: string, parentSession?: string): SessionHeader {
+    return {
+      type: "session",
+      version: CURRENT_SESSION_VERSION,
+      id,
+      timestamp: new Date().toISOString(),
+      cwd: this.cwd,
+      parentSession,
+    };
+  }
+
   private initializeSession(options?: NewSessionOptions): string | undefined {
     this.sessionId = options?.id ?? this.persistenceTarget?.sessionId ?? createManagedSessionId();
     this.migrated = false;
-    const timestamp = new Date().toISOString();
-    const header: SessionHeader = {
-      type: "session",
-      version: CURRENT_SESSION_VERSION,
-      id: this.sessionId,
-      timestamp,
-      cwd: this.cwd,
-      parentSession: options?.parentSession,
-    };
+    const header = this.createSessionHeader(this.sessionId, options?.parentSession);
     this.fileEntries = [header];
     this.opaqueFileEntries = [];
     this.byId.clear();

@@ -29,6 +29,7 @@ import {
   rotateTranscriptGenerationInTransaction,
   touchTranscriptMutationInTransaction,
 } from "./session-accessor.sqlite-transcript-state.js";
+import type { SessionResetBoundaryPlan } from "./session-reset-boundary-event.js";
 import {
   deleteSessionTranscriptIndexInTransaction,
   indexAppendedTranscriptEventInTransaction,
@@ -259,6 +260,29 @@ export function ensureTranscriptHeader(
     scope,
     createSessionTranscriptHeader({ cwd, sessionId: scope.sessionId }),
   );
+}
+
+/**
+ * Appends a reset boundary (plus any replay seed) to the session being reset.
+ *
+ * A boundary must never become the first persisted row: `ensureTranscriptHeader` only writes a
+ * header into a physically empty transcript, so a headerless `reset` row made the next append
+ * skip the header and left a transcript the runtime rejects as legacy (wedging the session; a
+ * second /new only appended another headerless boundary). Write the canonical current-version
+ * header first when the transcript is still empty.
+ */
+export function appendSessionResetBoundaryInTransaction(
+  database: OpenClawAgentDatabase,
+  scope: ResolvedTranscriptScope,
+  plan: SessionResetBoundaryPlan,
+  options: { label: string; cwd?: string },
+): void {
+  ensureTranscriptHeader(database, scope, options.cwd);
+  const events = [...plan.seedEvents, plan.event] as TranscriptEvent[];
+  const appended = appendTranscriptEventsInTransaction(database, scope, events);
+  if (appended !== events.length) {
+    throw new Error(`Failed to append reset boundary for ${options.label}`);
+  }
 }
 
 export function readActiveTranscriptAppendParentId(
