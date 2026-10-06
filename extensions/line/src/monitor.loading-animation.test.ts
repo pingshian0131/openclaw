@@ -183,6 +183,44 @@ describe("monitorLineProvider loading animation", () => {
     expect(resolvedTurn?.replyPipeline?.typingCallbacks).toBeDefined();
   });
 
+  it("skips the loading animation for richmenuswitch postbacks", async () => {
+    inboundRunMock.mockImplementation(async (params) => {
+      params.adapter.resolveTurn();
+      return { dispatched: true };
+    });
+
+    const onMessage = await captureOnMessage();
+    await onMessage({
+      ...lineInboundContext(),
+      event: {
+        type: "postback",
+        postback: {
+          data: "switch:admin-manage",
+          params: { newRichMenuAliasId: "admin-manage", status: "SUCCESS" },
+        },
+      },
+      isRichMenuSwitch: true,
+    });
+
+    expect(showLoadingAnimationMock).not.toHaveBeenCalled();
+  });
+
+  it("still shows the loading animation for ordinary postbacks", async () => {
+    inboundRunMock.mockImplementation(async (params) => {
+      params.adapter.resolveTurn();
+      return { dispatched: true };
+    });
+
+    const onMessage = await captureOnMessage();
+    await onMessage({
+      ...lineInboundContext(),
+      event: { type: "postback", postback: { data: "x" } },
+      isRichMenuSwitch: false,
+    });
+
+    expect(showLoadingAnimationMock).toHaveBeenCalled();
+  });
+
   it("renews well inside each animation window", async () => {
     inboundRunMock.mockImplementation(async (params) => {
       params.adapter.resolveTurn();

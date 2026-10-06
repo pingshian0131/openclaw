@@ -115,7 +115,10 @@ export async function monitorLineProvider(
       // its delivery run on that same one so the two can never disagree.
       const turnConfig = deliveryControl.cfg;
 
-      const shouldShowLoading = Boolean(ctx.userId && !ctx.isGroup);
+      // richmenuswitch postbacks are tab flips the plugin handles silently; no reply
+      // follows, so the loading animation would spin until it times out.
+      const isRichMenuSwitch = "isRichMenuSwitch" in ctx && ctx.isRichMenuSwitch === true;
+      const shouldShowLoading = Boolean(ctx.userId && !ctx.isGroup && !isRichMenuSwitch);
 
       // LINE's loading animation doubles as the read receipt: `chat/loading/start`
       // is the only endpoint a non-partner OA has for either, so start it up front
