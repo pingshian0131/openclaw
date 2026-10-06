@@ -131,7 +131,10 @@ export async function monitorLineProvider(
 
       const { ctxPayload, replyToken, route } = ctx;
 
-      const shouldShowLoading = Boolean(ctx.userId && !ctx.isGroup);
+      // richmenuswitch postbacks are tab flips the plugin handles silently; no reply
+      // follows, so the loading animation would spin until it times out.
+      const isRichMenuSwitch = "isRichMenuSwitch" in ctx && ctx.isRichMenuSwitch === true;
+      const shouldShowLoading = Boolean(ctx.userId && !ctx.isGroup && !isRichMenuSwitch);
 
       const displayNamePromise = ctx.userId
         ? getUserDisplayName(ctx.userId, { cfg: config, accountId: ctx.accountId })

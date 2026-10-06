@@ -281,6 +281,33 @@ describe("buildLineMessageContext", () => {
     expect(context?.ctxPayload.To).toBe("line:group:group-2");
   });
 
+  it("flags richmenuswitch postbacks via params.newRichMenuAliasId", async () => {
+    const plain = createPostbackEvent({ type: "user", userId: "user-4" });
+    const switchEvent = {
+      ...plain,
+      postback: {
+        data: "switch:admin-manage",
+        params: { newRichMenuAliasId: "admin-manage", status: "SUCCESS" },
+      },
+    } as typeof plain;
+
+    const switched = await buildLinePostbackContext({
+      event: switchEvent,
+      cfg,
+      account,
+      commandAuthorized: true,
+    });
+    const ordinary = await buildLinePostbackContext({
+      event: plain,
+      cfg,
+      account,
+      commandAuthorized: true,
+    });
+
+    expect(switched?.isRichMenuSwitch).toBe(true);
+    expect(ordinary?.isRichMenuSwitch).toBe(false);
+  });
+
   it("routes room postback replies to the room id", async () => {
     const event = createPostbackEvent({ type: "room", roomId: "room-1", userId: "user-3" });
 

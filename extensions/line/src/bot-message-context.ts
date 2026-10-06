@@ -508,6 +508,16 @@ export async function buildLineMessageContext(params: BuildLineMessageContextPar
   };
 }
 
+/**
+ * A richmenuswitch action makes LINE send a postback whose `postback.params`
+ * carries `newRichMenuAliasId` and `status` (LINE Messaging API postback-event
+ * reference; the SDK types params only as a string map).
+ */
+export function isLineRichMenuSwitchPostback(event: PostbackEvent): boolean {
+  const params = event.postback?.params;
+  return Boolean(params && typeof params.newRichMenuAliasId === "string");
+}
+
 export async function buildLinePostbackContext(params: {
   event: PostbackEvent;
   cfg: OpenClawConfig;
@@ -577,6 +587,7 @@ export async function buildLinePostbackContext(params: {
     route,
     replyToken: event.replyToken,
     accountId: account.accountId,
+    isRichMenuSwitch: isLineRichMenuSwitchPostback(event),
   };
 }
 
